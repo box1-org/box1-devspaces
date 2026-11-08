@@ -10,9 +10,10 @@ commands that Box1 devfiles call. Tracking issue: box1-org/box1-docs#114.
 
 | Already in the base image | Added by this image |
 | --- | --- |
-| `oc`, `kubectl` (includes kustomize), `tkn`, `tkn pac`, Maven, JDK 8/11/17/21, Node 22, podman/buildah, git, jq, yq | JDK 21 set as the default, JBang, Camel JBang (`camel`), the Claude Code CLI, and the helpers below |
+| `oc`, `kubectl` (includes kustomize), `tkn`, `tkn pac`, Maven, JDK 8/11/17/21, Node 22, podman/buildah, git, jq, yq | JDK 21 set as the default, JBang, Camel JBang (`camel`), the Claude Code CLI, the GitHub CLI (`gh`), and the helpers below |
 
-Every version is pinned. The JBang archive is also checked against its sha256.
+Every version is pinned. The JBang and `gh` archives are also checked against their sha256.
+`gh` starts logged out: run `gh auth login` in the workspace, or export `GH_TOKEN`.
 Run `cat /etc/box1-udi-release` in a workspace to see the versions.
 
 ## Helpers (`udi/bin`)
