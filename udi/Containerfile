@@ -1,0 +1,62 @@
+# Box1 Universal Developer Image for OpenShift Dev Spaces (box1-org/box1-docs#114).
+#
+# Base: the UDI shipped with Dev Spaces 3.29.1 (operator default component), so the
+# editor, entrypoint and home-directory stow behaviour stay exactly as supported.
+# It already has oc, kubectl (with kustomize), tkn 0.40, tkn-pac 0.33, Maven,
+# JDK 8/11/17/21, Node 22, podman/buildah, git, jq and yq.
+#
+# Added here, every version pinned (JBang archive also sha256-verified):
+#   - JDK 21 as the default (Box1 services build with maven.compiler.release 21)
+#   - JBang + Camel JBang (run and test Camel routes; Kaoto-authored YAML routes)
+#   - Claude Code CLI (the VS Code extension is installed from Open VSX)
+#   - box1-pipeline, box1-remote-dev, box1-debug (udi/bin), called by devfile commands
+#
+# Bump BASE_IMAGE when the Dev Spaces operator is upgraded:
+#   oc get deploy devspaces-operator -n openshift-devspaces \
+#     -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="CHE_DEFAULT_SPEC_DEVENVIRONMENTS_DEFAULTCOMPONENTS")].value}'
+ARG BASE_IMAGE=registry.redhat.io/devspaces/udi-rhel9@sha256:2708a8082c9c0aa569e31c79695483311cae3533e42b950fd02384b0def75415
+FROM ${BASE_IMAGE}
+
+ARG JBANG_VERSION=0.143.0
+ARG JBANG_SHA256=1388fcc2258e2bdcd277c68a5aad5a9d7c1dc8b57ef06165a45da02c2ed9775b
+ARG CAMEL_VERSION=4.23.0
+ARG CLAUDE_CODE_VERSION=2.1.319
+
+USER 0
+
+ENV JAVA_HOME=/usr/lib/jvm/java-21-openjdk \
+    JBANG_DIR=/opt/jbang \
+    JBANG_REPO=/opt/jbang/repository \
+    JBANG_NO_VERSION_CHECK=true \
+    PATH=/usr/lib/jvm/java-21-openjdk/bin:/opt/jbang/bin:${PATH}
+
+# JBang, then Camel JBang pre-resolved into a group-writable cache so the first
+# `camel run` in a workspace does not download the world. Arbitrary workspace UIDs
+# run with GID 0, hence chgrp 0 / g=u.
+RUN set -eux; \
+    mkdir -p /opt/jbang; \
+    curl -fsSL -o /tmp/jbang.tar "https://github.com/jbangdev/jbang/releases/download/v${JBANG_VERSION}/jbang-${JBANG_VERSION}.tar"; \
+    echo "${JBANG_SHA256}  /tmp/jbang.tar" | sha256sum -c -; \
+    tar -xf /tmp/jbang.tar -C /opt/jbang --strip-components=1; \
+    rm /tmp/jbang.tar; \
+    jbang version; \
+    jbang trust add https://github.com/apache/camel/; \
+    jbang app install --name camel -Dcamel.jbang.version=${CAMEL_VERSION} camel@apache/camel; \
+    camel --version; \
+    chgrp -R 0 /opt/jbang; chmod -R g=u /opt/jbang
+
+# Claude Code CLI. Authentication is per user at runtime (ANTHROPIC_API_KEY from a
+# mounted Secret, or interactive login); nothing is baked into the image.
+RUN set -eux; \
+    npm install --global --no-fund --no-audit "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"; \
+    claude --version; \
+    npm cache clean --force
+
+# Box1 workflow helpers used by devfile commands (pipelines, remote-dev, JVM debug).
+COPY --chmod=0755 bin/ /usr/local/bin/
+
+# Record what this image adds, for `cat /etc/box1-udi-release` in a workspace.
+RUN printf 'jbang=%s\ncamel-jbang=%s\nclaude-code=%s\njava-default=21\n' \
+      "${JBANG_VERSION}" "${CAMEL_VERSION}" "${CLAUDE_CODE_VERSION}" > /etc/box1-udi-release
+
+USER 10001
