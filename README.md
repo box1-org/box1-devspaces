@@ -14,6 +14,7 @@ commands that Box1 devfiles call. Tracking issue: box1-org/box1-docs#114.
 
 Every version is pinned. The JBang and `gh` archives are also checked against their sha256.
 `gh` starts logged out: run `gh auth login` in the workspace, or export `GH_TOKEN`.
+Podman stores images in `/var/lib/box1-containers` (set by `CONTAINERS_STORAGE_CONF`), not in the persistent home. Devfiles mount an ephemeral volume there.
 Run `cat /etc/box1-udi-release` in a workspace to see the versions.
 
 ## Helpers (`udi/bin`)

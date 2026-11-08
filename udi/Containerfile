@@ -12,6 +12,7 @@
 #   - GitHub CLI (gh), sha256-verified
 #   - box1-pipeline, box1-remote-dev, box1-debug, box1-podman-socket (udi/bin), called by devfile commands
 #   - DOCKER_HOST and TESTCONTAINERS_RYUK_DISABLED for Testcontainers on rootless podman
+#   - podman storage at /var/lib/box1-containers (CONTAINERS_STORAGE_CONF), not in the home
 #
 # Bump BASE_IMAGE when the Dev Spaces operator is upgraded:
 #   oc get deploy devspaces-operator -n openshift-devspaces \
@@ -34,6 +35,7 @@ ENV JAVA_HOME=/usr/lib/jvm/java-21-openjdk \
     JBANG_NO_VERSION_CHECK=true \
     PATH=/usr/lib/jvm/java-21-openjdk/bin:/opt/jbang/bin:${PATH} \
     DOCKER_HOST=unix:///tmp/podman-run/podman.sock \
+    CONTAINERS_STORAGE_CONF=/etc/containers/box1-containers-storage.conf \
     TESTCONTAINERS_RYUK_DISABLED=true
 
 # JBang, then Camel JBang pre-resolved into a group-writable cache so the first
@@ -66,6 +68,10 @@ RUN set -eux; \
     install -m 0755 "/tmp/gh_${GH_VERSION}_linux_amd64/bin/gh" /usr/local/bin/gh; \
     rm -rf /tmp/gh.tar.gz "/tmp/gh_${GH_VERSION}_linux_amd64"; \
     gh --version
+
+# Podman storage outside the persistent home (see the conf file for why).
+COPY etc/box1-containers-storage.conf /etc/containers/box1-containers-storage.conf
+RUN install -d -m 0775 -g 0 /var/lib/box1-containers
 
 # Box1 workflow helpers used by devfile commands (pipelines, remote-dev, JVM debug).
 COPY --chmod=0755 bin/ /usr/local/bin/
