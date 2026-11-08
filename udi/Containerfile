@@ -10,7 +10,8 @@
 #   - JBang + Camel JBang (run and test Camel routes; Kaoto-authored YAML routes)
 #   - Claude Code CLI (the VS Code extension is installed from Open VSX)
 #   - GitHub CLI (gh), sha256-verified
-#   - box1-pipeline, box1-remote-dev, box1-debug (udi/bin), called by devfile commands
+#   - box1-pipeline, box1-remote-dev, box1-debug, box1-podman-socket (udi/bin), called by devfile commands
+#   - DOCKER_HOST and TESTCONTAINERS_RYUK_DISABLED for Testcontainers on rootless podman
 #
 # Bump BASE_IMAGE when the Dev Spaces operator is upgraded:
 #   oc get deploy devspaces-operator -n openshift-devspaces \
@@ -31,7 +32,9 @@ ENV JAVA_HOME=/usr/lib/jvm/java-21-openjdk \
     JBANG_DIR=/opt/jbang \
     JBANG_REPO=/opt/jbang/repository \
     JBANG_NO_VERSION_CHECK=true \
-    PATH=/usr/lib/jvm/java-21-openjdk/bin:/opt/jbang/bin:${PATH}
+    PATH=/usr/lib/jvm/java-21-openjdk/bin:/opt/jbang/bin:${PATH} \
+    DOCKER_HOST=unix:///tmp/podman-run/podman.sock \
+    TESTCONTAINERS_RYUK_DISABLED=true
 
 # JBang, then Camel JBang pre-resolved into a group-writable cache so the first
 # `camel run` in a workspace does not download the world. Arbitrary workspace UIDs
