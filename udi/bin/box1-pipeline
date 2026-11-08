@@ -39,15 +39,28 @@ case "${1:-help}" in
     [ -z "$(git status --porcelain)" ] || echo "box1-pipeline: note: uncommitted changes are NOT part of this run" >&2
     token=$(github_token)
     [ -n "$token" ] || die "no GitHub token: set PAC_PROVIDER_TOKEN or connect GitHub in the Dev Spaces dashboard"
-    PAC_PROVIDER_TOKEN="$token" tkn pac resolve -f .tekton/pull-request.yaml \
-      -p revision="$rev" \
-      -p repo_url="https://github.com/$(slug)" \
-      -p repo_owner="$(dirname "$(slug)")" \
-      -p repo_name="$(service)" \
-      -p source_branch="$(git rev-parse --abbrev-ref HEAD)" \
-      -p target_branch=main \
-      | oc create -n "$NS" -f -
-    echo "Started. Follow it with: box1-pipeline logs"
+    # tkn pac resolve does not create the git-auth Secret non-interactively, so create
+    # one here (same key PaC uses) and make the PipelineRun its owner: it is garbage
+    # collected with the run. It holds your own GitHub token, readable in box1-ci only.
+    secret="box1-pipeline-$(service | cut -c1-30)-$(date +%s)"
+    oc create secret generic -n "$NS" "$secret" --from-literal=git-provider-token="$token" >/dev/null
+    oc label secret -n "$NS" "$secret" box1.org/created-by=box1-pipeline >/dev/null
+    if ! run=$(tkn pac resolve --no-secret -f .tekton/pull-request.yaml \
+        -p revision="$rev" \
+        -p git_auth_secret="$secret" \
+        -p repo_url="https://github.com/$(slug)" \
+        -p repo_owner="$(dirname "$(slug)")" \
+        -p repo_name="$(service)" \
+        -p source_branch="$(git rev-parse --abbrev-ref HEAD)" \
+        -p target_branch=main \
+        | oc create -n "$NS" -o name -f -); then
+      oc delete secret -n "$NS" "$secret" --ignore-not-found >/dev/null
+      die "could not create the PipelineRun"
+    fi
+    uid=$(oc get -n "$NS" "$run" -o jsonpath='{.metadata.uid}')
+    oc patch secret -n "$NS" "$secret" --type merge -p \
+      "{\"metadata\":{\"ownerReferences\":[{\"apiVersion\":\"tekton.dev/v1\",\"kind\":\"PipelineRun\",\"name\":\"${run#*/}\",\"uid\":\"$uid\"}]}}" >/dev/null
+    echo "Started ${run#*/} for $rev. Follow it with: box1-pipeline logs"
     ;;
   logs)
     run=$(tkn pipelinerun list -n "$NS" -l "backstage.io/kubernetes-id=$(service)" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)

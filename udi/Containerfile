@@ -9,6 +9,7 @@
 #   - JDK 21 as the default (Box1 services build with maven.compiler.release 21)
 #   - JBang + Camel JBang (run and test Camel routes; Kaoto-authored YAML routes)
 #   - Claude Code CLI (the VS Code extension is installed from Open VSX)
+#   - GitHub CLI (gh), sha256-verified
 #   - box1-pipeline, box1-remote-dev, box1-debug (udi/bin), called by devfile commands
 #
 # Bump BASE_IMAGE when the Dev Spaces operator is upgraded:
@@ -21,6 +22,8 @@ ARG JBANG_VERSION=0.143.0
 ARG JBANG_SHA256=1388fcc2258e2bdcd277c68a5aad5a9d7c1dc8b57ef06165a45da02c2ed9775b
 ARG CAMEL_VERSION=4.23.0
 ARG CLAUDE_CODE_VERSION=2.1.319
+ARG GH_VERSION=2.103.3
+ARG GH_SHA256=4c806978ffce1cec70853302a56d70ac6da4f19bae7adca4e1a8ab00633dd91d
 
 USER 0
 
@@ -52,11 +55,20 @@ RUN set -eux; \
     claude --version; \
     npm cache clean --force
 
+# GitHub CLI. Not logged in: run `gh auth login` in the workspace, or export GH_TOKEN.
+RUN set -eux; \
+    curl -fsSL -o /tmp/gh.tar.gz "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_amd64.tar.gz"; \
+    echo "${GH_SHA256}  /tmp/gh.tar.gz" | sha256sum -c -; \
+    tar -xzf /tmp/gh.tar.gz -C /tmp; \
+    install -m 0755 "/tmp/gh_${GH_VERSION}_linux_amd64/bin/gh" /usr/local/bin/gh; \
+    rm -rf /tmp/gh.tar.gz "/tmp/gh_${GH_VERSION}_linux_amd64"; \
+    gh --version
+
 # Box1 workflow helpers used by devfile commands (pipelines, remote-dev, JVM debug).
 COPY --chmod=0755 bin/ /usr/local/bin/
 
 # Record what this image adds, for `cat /etc/box1-udi-release` in a workspace.
-RUN printf 'jbang=%s\ncamel-jbang=%s\nclaude-code=%s\njava-default=21\n' \
-      "${JBANG_VERSION}" "${CAMEL_VERSION}" "${CLAUDE_CODE_VERSION}" > /etc/box1-udi-release
+RUN printf 'jbang=%s\ncamel-jbang=%s\nclaude-code=%s\ngh=%s\njava-default=21\n' \
+      "${JBANG_VERSION}" "${CAMEL_VERSION}" "${CLAUDE_CODE_VERSION}" "${GH_VERSION}" > /etc/box1-udi-release
 
 USER 10001
