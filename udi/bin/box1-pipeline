@@ -1,0 +1,66 @@
+#!/bin/bash
+# box1-pipeline: run and follow this repository's Tekton pipelines from a Dev Spaces workspace.
+#
+#   box1-pipeline validate   resolve .tekton/pull-request.yaml for the pushed HEAD and start it in box1-ci
+#   box1-pipeline logs       follow the newest PipelineRun for this repository
+#   box1-pipeline list       list recent PipelineRuns for this repository
+#
+# Pipelines fetch source from GitHub, so they only ever see pushed commits; use
+# box1-remote-dev for uncommitted code. Releases are not started here: they run
+# from Pipelines as Code on push to main (Argo CD remains the only deployer).
+# Runs as the workspace user, so it needs rights to create PipelineRuns and Secrets in box1-ci.
+set -euo pipefail
+
+NS=${BOX1_CI_NAMESPACE:-box1-ci}
+die() { echo "box1-pipeline: $*" >&2; exit 1; }
+
+slug() {
+  git remote get-url origin | sed -E 's#^(git@github\.com:|https://github\.com/)##; s#\.git$##'
+}
+service() { basename "$(slug)"; }
+
+github_token() {
+  if [ -n "${PAC_PROVIDER_TOKEN:-}" ]; then printf %s "$PAC_PROVIDER_TOKEN"; return; fi
+  # Dev Spaces mounts the user's GitHub OAuth token as a git credential.
+  local f
+  for f in "$HOME/.git-credentials" /.git-credentials/credentials; do
+    [ -r "$f" ] || continue
+    sed -nE 's#^https://[^:]*:([^@]+)@github\.com.*#\1#p' "$f" | head -1
+    return
+  done
+}
+
+case "${1:-help}" in
+  validate)
+    [ -f .tekton/pull-request.yaml ] || die "run from the repository root (.tekton/pull-request.yaml not found)"
+    rev=$(git rev-parse HEAD)
+    git fetch -q origin
+    [ -n "$(git branch -r --contains "$rev")" ] || die "HEAD $rev is not pushed; push it first (or use box1-remote-dev for uncommitted code)"
+    [ -z "$(git status --porcelain)" ] || echo "box1-pipeline: note: uncommitted changes are NOT part of this run" >&2
+    token=$(github_token)
+    [ -n "$token" ] || die "no GitHub token: set PAC_PROVIDER_TOKEN or connect GitHub in the Dev Spaces dashboard"
+    PAC_PROVIDER_TOKEN="$token" tkn pac resolve -f .tekton/pull-request.yaml \
+      -p revision="$rev" \
+      -p repo_url="https://github.com/$(slug)" \
+      -p repo_owner="$(dirname "$(slug)")" \
+      -p repo_name="$(service)" \
+      -p source_branch="$(git rev-parse --abbrev-ref HEAD)" \
+      -p target_branch=main \
+      | oc create -n "$NS" -f -
+    echo "Started. Follow it with: box1-pipeline logs"
+    ;;
+  logs)
+    run=$(tkn pipelinerun list -n "$NS" -l "backstage.io/kubernetes-id=$(service)" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+    [ -n "$run" ] || run=$(oc get pipelinerun -n "$NS" --sort-by=.metadata.creationTimestamp -o name | grep "/$(service)-" | tail -1 | cut -d/ -f2)
+    [ -n "$run" ] || die "no PipelineRun found for $(service) in $NS"
+    tkn pipelinerun logs -f -n "$NS" "$run"
+    ;;
+  list)
+    oc get pipelinerun -n "$NS" --sort-by=.metadata.creationTimestamp \
+      -o custom-columns='NAME:.metadata.name,STATUS:.status.conditions[0].reason,STARTED:.status.startTime' \
+      | awk -v s="$(service)-" 'NR==1 || index($1, s)==1' | tail -15
+    ;;
+  *)
+    sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'
+    ;;
+esac

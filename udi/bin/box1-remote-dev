@@ -1,0 +1,75 @@
+#!/bin/bash
+# box1-remote-dev: run uncommitted code on the cluster with Quarkus remote development.
+#
+#   box1-remote-dev deploy   build a mutable-jar image from the working tree, push it to your
+#                            sandbox namespace and apply deploy/remote-dev (JDWP on 127.0.0.1:5005)
+#   box1-remote-dev sync     live-sync local changes to the running pod (Ctrl+C to stop)
+#   box1-remote-dev url      print the sandbox Route
+#   box1-remote-dev delete   remove the remote-dev resources and image from the sandbox
+#
+# The sandbox namespace (default <openshift-user>-sandbox, override BOX1_SANDBOX_NAMESPACE)
+# is provisioned by box1-gitops; Argo CD owns the namespace, not what you deploy into it.
+# Nothing here touches <service>-dev, which stays under Argo CD.
+set -euo pipefail
+
+die() { echo "box1-remote-dev: $*" >&2; exit 1; }
+[ -d deploy/remote-dev ] || die "run from the repository root (deploy/remote-dev not found)"
+
+SVC=${SERVICE_NAME:-$(basename "$(git rev-parse --show-toplevel)")}
+NS=${BOX1_SANDBOX_NAMESPACE:-$(oc whoami | tr '[:upper:]' '[:lower:]')-sandbox}
+REGISTRY=${BOX1_REGISTRY:-registry.apps.ocp.box1.org}
+APP="$SVC-remote-dev"
+SECRET="$APP-live-reload"
+
+password() {
+  oc get secret -n "$NS" "$SECRET" -o jsonpath='{.data.password}' 2>/dev/null | base64 -d
+}
+
+route_url() {
+  host=$(oc get route -n "$NS" "$APP" -o jsonpath='{.spec.host}' 2>/dev/null) || true
+  [ -n "$host" ] || die "no Route $APP in $NS; run: box1-remote-dev deploy"
+  printf 'https://%s\n' "$host"
+}
+
+case "${1:-help}" in
+  deploy)
+    oc get namespace "$NS" >/dev/null 2>&1 || die "sandbox namespace $NS not found (provisioned in box1-gitops platform/dev-spaces/sandboxes)"
+    if [ -z "$(password)" ]; then
+      oc create secret generic -n "$NS" "$SECRET" --from-literal=password="$(openssl rand -hex 24)" >/dev/null
+    fi
+    # Jib pushes straight to the sandbox ImageStream with your own token; nothing goes to box1-ci.
+    ./mvnw -B -q package -DskipTests \
+      -Dquarkus.package.jar.type=mutable-jar \
+      -Dquarkus.container-image.build=true \
+      -Dquarkus.container-image.push=true \
+      -Dquarkus.container-image.registry="$REGISTRY" \
+      -Dquarkus.container-image.group="$NS" \
+      -Dquarkus.container-image.name="$SVC" \
+      -Dquarkus.container-image.tag=remote-dev \
+      -Dquarkus.container-image.username="$(oc whoami)" \
+      -Dquarkus.container-image.password="$(oc whoami -t)"
+    oc set image-lookup -n "$NS" "$SVC" >/dev/null
+    oc apply -n "$NS" -k deploy/remote-dev
+    oc rollout restart -n "$NS" "deployment/$APP" >/dev/null
+    oc rollout status -n "$NS" "deployment/$APP" --timeout=5m
+    echo "Running at $(route_url). Start live sync with: box1-remote-dev sync"
+    ;;
+  sync)
+    pw=$(password); [ -n "$pw" ] || die "no live-reload Secret; run: box1-remote-dev deploy"
+    exec ./mvnw quarkus:remote-dev \
+      -Dquarkus.package.jar.type=mutable-jar \
+      -Dquarkus.live-reload.url="$(route_url)" \
+      -Dquarkus.live-reload.password="$pw"
+    ;;
+  url)
+    route_url
+    ;;
+  delete)
+    oc delete -n "$NS" -k deploy/remote-dev --ignore-not-found
+    oc delete -n "$NS" secret "$SECRET" --ignore-not-found
+    oc delete -n "$NS" imagestream "$SVC" --ignore-not-found
+    ;;
+  *)
+    sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'
+    ;;
+esac

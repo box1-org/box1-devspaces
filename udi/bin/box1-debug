@@ -1,0 +1,35 @@
+#!/bin/bash
+# box1-debug: forward a cluster JVM's debug port to localhost:5005 in the workspace,
+# then use the "Attach to JVM (localhost:5005)" launch configuration.
+#
+#   box1-debug sandbox [service]   your remote-dev pod (JDWP always on)
+#   box1-debug dev [service]       <service>-dev, only if the jvm-debug component is
+#                                  enabled for that service in box1-workloads-dev
+#
+# JDWP listens on 127.0.0.1 inside the pod, so it is reachable only through
+# `oc port-forward` (which needs pods/portforward in that namespace), not from other pods.
+set -euo pipefail
+
+die() { echo "box1-debug: $*" >&2; exit 1; }
+SVC=${2:-${SERVICE_NAME:-$(basename "$(git rev-parse --show-toplevel)")}}
+PORT=${BOX1_DEBUG_PORT:-5005}
+
+case "${1:-help}" in
+  sandbox)
+    NS=${BOX1_SANDBOX_NAMESPACE:-$(oc whoami | tr '[:upper:]' '[:lower:]')-sandbox}
+    TARGET="deployment/$SVC-remote-dev"
+    ;;
+  dev)
+    NS="$SVC-dev"
+    TARGET="deployment/$SVC"
+    oc get "$TARGET" -n "$NS" -o jsonpath='{.spec.template.metadata.annotations.box1\.org/jvm-debug}' 2>/dev/null \
+      | grep -qx enabled || die "jvm-debug is not enabled for $SVC in $NS (add components/jvm-debug in box1-workloads-dev)"
+    ;;
+  *)
+    sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//'
+    exit 0
+    ;;
+esac
+
+echo "Forwarding $NS/$TARGET :5005 -> localhost:$PORT (Ctrl+C to stop)"
+exec oc port-forward -n "$NS" "$TARGET" "$PORT:5005"
