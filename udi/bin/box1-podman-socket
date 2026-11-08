@@ -1,0 +1,37 @@
+#!/bin/bash
+# box1-podman-socket: run podman's Docker-compatible API for Testcontainers and
+# other Docker clients in a Dev Spaces workspace (box1-org/box1-docs#114).
+#
+#   box1-podman-socket start    start the service unless it already answers (idempotent)
+#   box1-podman-socket status   ping the socket
+#   box1-podman-socket stop     stop the service
+#
+# The image sets DOCKER_HOST to this socket and TESTCONTAINERS_RYUK_DISABLED=true
+# (Ryuk needs a privileged container under rootless podman). Devfiles call
+# `start` from a postStart event. Needs container run enabled in the CheCluster.
+set -euo pipefail
+
+SOCK=${BOX1_PODMAN_SOCKET:-/tmp/podman-run/podman.sock}
+LOG=/tmp/podman-run/service.log
+die() { echo "box1-podman-socket: $*" >&2; exit 1; }
+ping() { curl -fsS --max-time 2 --unix-socket "$SOCK" http://d/_ping >/dev/null 2>&1; }
+
+case "${1:-help}" in
+  start)
+    ping && { echo "podman API already running at $SOCK"; exit 0; }
+    mkdir -p "$(dirname "$SOCK")"; chmod 700 "$(dirname "$SOCK")"
+    rm -f "$SOCK"
+    nohup podman system service --time=0 "unix://$SOCK" > "$LOG" 2>&1 &
+    for _ in $(seq 1 30); do ping && { echo "podman API running at $SOCK"; exit 0; }; sleep 1; done
+    die "podman API did not start; see $LOG (is container run enabled for this workspace?)"
+    ;;
+  status)
+    ping && echo "running at $SOCK" || { echo "not running ($SOCK)"; exit 1; }
+    ;;
+  stop)
+    pkill -f "podman system service .*unix://$SOCK" && echo stopped || echo "not running"
+    ;;
+  *)
+    sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//'
+    ;;
+esac

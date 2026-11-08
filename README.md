@@ -23,6 +23,7 @@ Run `cat /etc/box1-udi-release` in a workspace to see the versions.
 | `box1-pipeline validate\|logs\|list` | Resolves `.tekton/pull-request.yaml` for the **pushed** HEAD and starts it in `box1-ci`, then follows or lists its runs. Releases aren't started from here; they run from Pipelines as Code on push to `main`. |
 | `box1-remote-dev deploy\|sync\|url\|delete` | Quarkus remote dev. Builds a mutable-jar image from the working tree, pushes it to your sandbox namespace (`<user>-sandbox`), applies the repository's `deploy/remote-dev`, then live-syncs your changes. |
 | `box1-debug sandbox\|dev [service]` | Port-forwards JDWP (`127.0.0.1:5005` in the pod) to `localhost:5005` so the VS Code Java debugger can attach. |
+| `box1-podman-socket start\|status\|stop` | Runs podman's Docker-compatible API at `/tmp/podman-run/podman.sock`. The image points `DOCKER_HOST` there and sets `TESTCONTAINERS_RYUK_DISABLED=true`, so Testcontainers (`-Pcontainers`) works. Devfiles start it in a postStart event. Needs container run enabled in the CheCluster. |
 
 None of these helpers deploy to `<service>-dev`. Argo CD stays the only deployer there.
 
